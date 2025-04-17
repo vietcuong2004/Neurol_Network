@@ -54,6 +54,28 @@ void normalize(vector<vector<double>>& data) {
     }
 }
 
+// Tính min và max của từng đặc trưng để dùng cho chuẩn hóa dữ liệu đầu vào khi dự đoán
+void compute_min_max(const vector<vector<double>>& data, vector<double>& min_vals, vector<double>& max_vals) {
+    min_vals.resize(INPUT_SIZE);
+    max_vals.resize(INPUT_SIZE);
+    for (int j = 0; j < INPUT_SIZE; j++) {
+        double min_val = data[0][j], max_val = data[0][j];
+        for (const auto& row : data) {
+            min_val = min(min_val, row[j]);
+            max_val = max(max_val, row[j]);
+        }
+        min_vals[j] = min_val;
+        max_vals[j] = max_val;
+    }
+}
+
+// Chuẩn hóa một mẫu dữ liệu đầu vào dựa trên min và max đã tính
+void normalize_input(vector<double>& input, const vector<double>& min_vals, const vector<double>& max_vals) {
+    for (int j = 0; j < INPUT_SIZE; j++) {
+        input[j] = (input[j] - min_vals[j]) / (max_vals[j] - min_vals[j] + 1e-6);
+    }
+}
+
 // Loại bỏ khoảng trắng thừa ở đầu và cuối chuỗi, dùng để xử lý dữ liệu đầu vào từ file CSV
 string trim(const string& str) {
     size_t first = str.find_first_not_of(" \t\r\n");
@@ -100,7 +122,7 @@ void read_csv(const string& filename, vector<vector<double>>& X, vector<double>&
     }
 }
 
-// Huấn luyện mô hình với lan truyền thuận (tính dự đoán) và lan truyền ngược (cập nhật trọng số), sử dụng mini-batch gradient descent
+// Huấn luyện mô hình thần kinh với lan truyền thuận (tính dự đoán) và lan truyền ngược (cập nhật trọng số), sử dụng mini-batch gradient descent
 void train_model(const vector<vector<double>>& X, const vector<double>& y,
                  vector<vector<double>>& W1, vector<double>& B1,
                  vector<vector<double>>& W2, vector<double>& B2) {
@@ -326,11 +348,38 @@ void cross_validate(const vector<vector<double>>& X_all, const vector<double>& y
     cout << "Total Number of Instances              " << y_true_all.size() << "\n";
 }
 
+// Dự đoán giá trị medv dựa trên 13 đặc trưng đầu vào từ người dùng
+double predict(const vector<double>& input, const vector<vector<double>>& W1, const vector<double>& B1,
+               const vector<vector<double>>& W2, const vector<double>& B2, double y_mean, double y_std) {
+    vector<double> a(HIDDEN_SIZE);
+    for (int j = 0; j < HIDDEN_SIZE; j++) {
+        a[j] = B1[j];
+        for (int k = 0; k < INPUT_SIZE; k++) {
+            a[j] += input[k] * W1[k][j];
+        }
+        a[j] = relu(a[j]);
+    }
+
+    double output = B2[0];
+    for (int j = 0; j < HIDDEN_SIZE; j++) {
+        output += a[j] * W2[j][0];
+    }
+
+    // Giải chuẩn hóa giá trị đầu ra để trả về giá trị thực tế
+    return output * y_std + y_mean;
+}
+
 // Hàm chính, điều phối đọc dữ liệu, chuẩn hóa, huấn luyện và đánh giá mô hình qua cross-validation
 int main() {
     vector<vector<double>> X;
     vector<double> y;
     read_csv("BostonHousing.csv", X, y);
+
+    // Tính min và max của từng đặc trưng để chuẩn hóa dữ liệu đầu vào khi dự đoán
+    vector<double> min_vals, max_vals;
+    compute_min_max(X, min_vals, max_vals);
+
+    // Chuẩn hóa dữ liệu huấn luyện
     normalize(X);
 
     double y_mean = accumulate(y.begin(), y.end(), 0.0) / y.size();
@@ -344,5 +393,22 @@ int main() {
     train_model(X, y, W1, B1, W2, B2);
 
     cross_validate(X, y, y_mean, y_std, W1, B1, W2, B2);
+
+    // Phần dự đoán: Nhập 13 đặc trưng từ người dùng
+    cout << "\n=== Du doan gia tri medv ===\n";
+    cout << ">> Nhap 13 dac trung (crim, zn, indus, chas, nox, rm, age, dis, rad, tax, ptratio, b, lstat):\n";
+    vector<double> input(INPUT_SIZE);
+    for (int i = 0; i < INPUT_SIZE; i++) {
+        cout << attribute_names[i] << ": ";
+        cin >> input[i];
+    }
+
+    // Chuẩn hóa dữ liệu đầu vào
+    normalize_input(input, min_vals, max_vals);
+
+    // Dự đoán và in kết quả
+    double predicted_medv = predict(input, W1, B1, W2, B2, y_mean, y_std);
+    cout << "\n>> Gia tri MEDV du doan: " << fixed << setprecision(4) << predicted_medv << endl;
+
     return 0;
 }
